@@ -1,59 +1,64 @@
 import librosa
 import numpy as np
 import soundfile as sf
-import jiwer
-import time
-import pandas as pd
+import scipy.signal
 
-def load_audio(file_path):
-    audio, sr = librosa.load(file_path, sr=None)
-    return audio, sr
+def anonymize(input_audio_path):
+    """
+    Applies multiple transformations to anonymize the voice.
 
-def anonymize_audio(audio, sample_rate, pitch_shift=4, noise_level=0.01):
-    audio = librosa.effects.pitch_shift(audio, sample_rate, n_steps=pitch_shift)
-    noise = np.random.normal(0, noise_level, audio.shape)
-    audio = np.clip(audio + noise, -1, 1)
-    return audio.astype(np.float32), sample_rate
+    Parameters
+    ----------
+    input_audio_path : str
+        Path to the original audio file.
 
-def simulate_asr_transcription(audio, sr):
-    # This should be replaced with real ASR API integration
-    return "simulated transcription based on anonymized audio"
+    Returns
+    -------
+    anonymized_audio : numpy.ndarray
+        The anonymized audio data.
+    sr : int
+        The sample rate of the processed audio.
+    """
 
-def calculate_wer(ground_truth, hypothesis):
-    transformation = jiwer.Compose([
-        jiwer.ToLowerCase(),
-        jiwer.RemoveMultipleSpaces(),
-        jiwer.RemovePunctuation()
-    ])
-    return jiwer.wer(ground_truth, hypothesis, truth_transform=transformation, hypothesis_transform=transformation)
+    # Load the audio file (ensure 16kHz sampling rate for consistency)
+    audio, sr = librosa.load(input_audio_path, sr=16000)
 
-def simulate_eer(asv_system, real_speakers, anonymized_speakers):
-    # Placeholder for EER calculation using an ASV system
-    # real_speakers and anonymized_speakers should be lists of feature vectors
-    return 0.05  # Simulated EER value
+    # Ensure the audio is at least 1 second long to avoid errors
+    if len(audio) < sr:
+        raise ValueError(f"Audio file {input_audio_path} is too short (<1s). Please use a longer file.")
 
-def process_files(audio_files, ground_truths):
-    results = []
-    for file_path, truth in zip(audio_files, ground_truths):
-        start_time = time.time()
-        audio, sr = load_audio(file_path)
-        anonymized_audio, _ = anonymize_audio(audio, sr)
-        hypothesis = simulate_asr_transcription(anonymized_audio, sr)
-        wer = calculate_wer(truth, hypothesis)
-        processing_time = time.time() - start_time
-        eer = simulate_eer(None, None, None)  # Simulate ASV results
-        results.append([file_path, wer, eer, processing_time])
-    return results
+    # 1️⃣ Modify pitch (change vocal height)
+    try:
+        audio = librosa.effects.pitch_shift(audio, sr=sr, n_steps=5)
+    except Exception as e:
+        print(f"Error in pitch shift for {input_audio_path}: {e}")
 
-def main():
-    audio_files = ["path/to/audio1.wav", "path/to/audio2.wav"]
-    ground_truths = ["correct transcription of audio1", "correct transcription of audio2"]
-    results = process_files(audio_files, ground_truths)
-    results_df = pd.DataFrame(results, columns=['File', 'WER', 'EER', 'Processing Time'])
-    results_df.to_csv('results.csv', index=False)
-    print("Evaluation completed and results are stored in results.csv.")
+    # 2️⃣ Apply time stretching (speed up/slow down)
+    try:
+        audio = librosa.effects.time_stretch(audio, rate=1.1)
+    except Exception as e:
+        print(f"Error in time stretch for {input_audio_path}: {e}")
 
-if __name__ == "__main__":
-    main()
+    # 3️⃣ Add white noise
+    noise = np.random.normal(0, 0.005, audio.shape)
+    audio = audio + noise
 
+    # 4️⃣ Apply band-pass filtering (alter spectral characteristics)
+    try:
+        b, a = scipy.signal.butter(4, [300/(sr/2), 3400/(sr/2)], btype='band')
+        audio = scipy.signal.filtfilt(b, a, audio)
+    except Exception as e:
+        print(f"Error in band-pass filtering for {input_audio_path}: {e}")
 
+    # 5️⃣ Apply Vocal Tract Length Normalization (VTLN)
+    try:
+        warp_factor = np.random.uniform(0.9, 1.1)
+        anonymized_audio = librosa.effects.pitch_shift(audio, sr=sr, n_steps=np.log2(warp_factor) * 12)
+    except Exception as e:
+        print(f"Error in VTLN for {input_audio_path}: {e}")
+        anonymized_audio = audio  # Fallback to original audio if error occurs
+
+    # Ensure audio remains within [-1, 1] range to avoid distortion
+    anonymized_audio = np.clip(anonymized_audio, -1, 1)
+
+    return anonymized_audio, sr  # ✅ Ensuring compatibility with evaluation.py
